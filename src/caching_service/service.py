@@ -12,6 +12,20 @@ from caching_service.models import CachedTransform, Payload
 
 def create_payload(session: Session, list_1: list[str], list_2: list[str]) -> tuple[Payload, bool]:
     """Return the payload for the given input and whether it was newly created."""
+    try:
+        return _get_or_create_payload(session, list_1, list_2)
+    except IntegrityError:
+        # A concurrent request stored the same payload or cache entry first.
+        # Its rows are visible now, so a second pass will reuse them. A second
+        # conflict is more likely a bug than another race, so it propagates
+        # instead of being retried forever.
+        session.rollback()
+        return _get_or_create_payload(session, list_1, list_2)
+
+
+def _get_or_create_payload(
+    session: Session, list_1: list[str], list_2: list[str]
+) -> tuple[Payload, bool]:
     input_hash = _hash_input(list_1, list_2)
     existing = session.scalar(select(Payload).where(Payload.input_hash == input_hash))
     if existing:
@@ -21,13 +35,7 @@ def create_payload(session: Session, list_1: list[str], list_2: list[str]) -> tu
     interleaved = chain.from_iterable(zip(list_1, list_2, strict=True))
     payload = Payload(input_hash=input_hash, output=", ".join(transformed[s] for s in interleaved))
     session.add(payload)
-    try:
-        session.commit()
-    except IntegrityError:
-        # A concurrent request stored the same payload or cache entry first.
-        # Its rows are visible now, so a second pass will reuse them.
-        session.rollback()
-        return create_payload(session, list_1, list_2)
+    session.commit()
     return payload, True
 
 

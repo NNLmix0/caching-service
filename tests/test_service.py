@@ -1,4 +1,6 @@
+import pytest
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from caching_service import transformer
@@ -73,3 +75,17 @@ def test_concurrent_duplicate_request_returns_the_stored_payload(engine, session
     assert not created
     assert [payload.id] == winner_ids
     assert session.scalar(select(func.count()).select_from(Payload)) == 1
+
+
+def test_conflict_is_retried_only_once(session, monkeypatch):
+    commit_attempts = []
+
+    def conflicting_commit():
+        commit_attempts.append(1)
+        raise IntegrityError("INSERT", {}, Exception("conflict"))
+
+    monkeypatch.setattr(session, "commit", conflicting_commit)
+
+    with pytest.raises(IntegrityError):
+        create_payload(session, ["x"], ["y"])
+    assert len(commit_attempts) == 2
