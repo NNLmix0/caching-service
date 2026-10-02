@@ -1,8 +1,11 @@
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from caching_service import transformer
+from caching_service.api import app
+from caching_service.db import get_session
 from caching_service.models import Base
 
 
@@ -18,6 +21,17 @@ def engine(tmp_path):
 def session(engine):
     with Session(engine) as session:
         yield session
+
+
+@pytest.fixture
+def client(engine):
+    def get_test_session():
+        with Session(engine) as session:
+            yield session
+
+    app.dependency_overrides[get_session] = get_test_session
+    yield TestClient(app)
+    app.dependency_overrides.clear()
 
 
 @pytest.fixture
