@@ -105,6 +105,11 @@ see `.env.example`). It defaults to `sqlite:///./cache.db`.
 `-h` stays with help, as users of any command-line tool expect, and the host
 gets `-H`.
 
+**Payloads live in the database, not in files.** The task mentions "generated
+payloads files". A payload here is a short string that is only ever read back
+by id, so it is stored as a row next to the cache; writing it to a file as well
+would add a second storage to keep consistent without changing the API.
+
 **A payload is identified by its input.** The payload table stores a SHA-256
 hash of the two input lists under a unique constraint. A repeated request is
 recognised from the hash alone, without calling the transformer. The trade-off:
@@ -113,7 +118,9 @@ ids.
 
 **Minimising transformer calls.** Strings are de-duplicated within a request,
 the cache is read with a single `SELECT ... IN`, and the transformer runs only
-for strings that are not cached yet. Cached entries never expire.
+for strings that are not cached yet. Strings are cached exactly as received,
+with no trimming or case folding, so `"a"` and `"a "` are separate entries.
+Cached entries never expire.
 
 **Concurrency.** Unique constraints keep the data correct when two requests
 race: the loser's commit fails, and it retries once, now finding the winner's
@@ -136,8 +143,10 @@ parameters; the lookup would then have to be split into batches.
 **No migrations.** The two tables are created on startup with `create_all`.
 A schema that evolves would call for Alembic.
 
-**`201` vs `200` on `POST`.** The status tells the client whether the payload
-was created or reused, which also lets the CLI show cache hits.
+**The `POST` response.** The task asks for a confirmation message with the
+identifier. The body is just `{"id": ...}` and the status code is the
+confirmation: `201` when the payload was created, `200` when an existing one
+was reused. This also lets the CLI show cache hits.
 
 **Empty lists are rejected.** A payload built from nothing has no meaning, so
 it is a validation error instead of an empty output.
